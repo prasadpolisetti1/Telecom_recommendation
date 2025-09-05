@@ -3,6 +3,8 @@ import bcrypt
 from pymongo import MongoClient
 import pandas as pd
 import random
+import plotly.express as px
+
 
 # --- Always FIRST Streamlit command ---
 st.set_page_config(page_title="Telecom Plan Recommender", layout="wide")
@@ -167,15 +169,12 @@ def admin_dashboard(user):
                 with col1:
                     st.write(
                         f"**{p.get('name', '-')}** — {p.get('role', '-')} — {p.get('email', '-')}")
-
                 with col2:
                     if st.button("✅ Approve", key=f"approve_{p.get('email')}"):
-                        users_collection.update_one(
-                            {"email": p['email']}, {"$set": {"approved": True}}
-                        )
+                        users_collection.update_one({"email": p['email']}, {
+                                                    "$set": {"approved": True}})
                         st.success(f"Approved {p['email']}")
                         st.rerun()
-
                 with col3:
                     if st.button("❌ Reject", key=f"reject_{p.get('email')}"):
                         users_collection.delete_one({"email": p['email']})
@@ -190,7 +189,6 @@ def admin_dashboard(user):
 
         subtab1, subtab2 = st.tabs(["📊 Analysts", "👤 Customers"])
 
-        # Analysts
         with subtab1:
             analysts = list(users_collection.find(
                 {"approved": True, "role": "Analyst"}, {"password": 0}))
@@ -199,7 +197,6 @@ def admin_dashboard(user):
             else:
                 st.info("No analysts found.")
 
-        # Customers
         with subtab2:
             customers = list(users_collection.find(
                 {"approved": True, "role": "Customer"}, {"password": 0}))
@@ -232,12 +229,12 @@ def admin_dashboard(user):
                     "email": email,
                     "password": hashed_pw,
                     "role": role,
-                    "approved": True  # Directly approved by admin
+                    "approved": True
                 })
                 st.success(f"✅ {role} added successfully!")
                 st.rerun()
 
-    # --- Tab 4: Manage Recharge Plans ---
+    # --- Tab 4: Manage Plans ---
     with tabs[3]:
         st.subheader("📦 Manage Recharge Plans")
         plans_collection = db["Plans"]
@@ -268,13 +265,11 @@ def admin_dashboard(user):
                 st.success(f"✅ Plan '{plan_name}' added successfully!")
                 st.rerun()
 
-        # Display existing plans
         st.markdown("### 📋 Existing Plans")
         all_plans = list(plans_collection.find())
         if all_plans:
             df = pd.DataFrame(all_plans).drop(columns=["_id"])
             st.dataframe(df)
-
             for p in all_plans:
                 if st.button(f"🗑️ Delete {p['plan_name']}", key=f"del_plan_{p['plan_name']}"):
                     plans_collection.delete_one({"plan_name": p["plan_name"]})
@@ -286,20 +281,53 @@ def admin_dashboard(user):
     # --- Tab 5: Plan Analytics ---
     with tabs[4]:
         st.subheader("📊 Plan Analytics")
-        # Assuming orders store user-plan relations
+        plans_collection = db["Plans"]
         orders_collection = db["Orders"]
 
-        pipeline = [
-            {"$group": {"_id": "$plan_name", "count": {"$sum": 1}}}
-        ]
+        # --- Available Plans Overview ---
+        st.markdown("### 📦 Available Plans")
+        plans = list(plans_collection.find({}, {"_id": 0}))
+        if plans:
+            df_plans = pd.DataFrame(plans)
+            st.dataframe(df_plans)
+
+            col1, col2 = st.columns(2)
+            with col1:
+                fig_price = px.bar(df_plans, x="plan_name",
+                                   y="monthly_cost", title="Plan Pricing")
+                st.plotly_chart(fig_price, use_container_width=True)
+            with col2:
+                fig_data = px.scatter(
+                    df_plans, x="monthly_cost", y="data_limit_gb",
+                    text="plan_name", size="data_limit_gb", color="validity_days",
+                    title="Cost vs Data Limit"
+                )
+                st.plotly_chart(fig_data, use_container_width=True)
+
+        # --- Customer Usage ---
+        st.markdown("### 👥 Customer Usage")
+        pipeline = [{"$group": {"_id": "$plan_name", "count": {"$sum": 1}}}]
         plan_usage = list(orders_collection.aggregate(pipeline))
 
         if plan_usage:
             df_usage = pd.DataFrame(plan_usage)
             df_usage.rename(
                 columns={"_id": "Plan Name", "count": "Users"}, inplace=True)
-            st.bar_chart(df_usage.set_index("Plan Name"))
-            st.dataframe(df_usage)
+
+            col1, col2 = st.columns(2)
+            with col1:
+                fig_popular = px.bar(
+                    df_usage, x="Plan Name", y="Users", title="Plan Popularity")
+                st.plotly_chart(fig_popular, use_container_width=True)
+            with col2:
+                fig_share = px.pie(df_usage, names="Plan Name",
+                                   values="Users", title="Market Share")
+                st.plotly_chart(fig_share, use_container_width=True)
+
+            st.markdown("### 🏆 Top 3 Popular Plans")
+            top3 = df_usage.sort_values("Users", ascending=False).head(3)
+            for _, row in top3.iterrows():
+                st.success(f"{row['Plan Name']} → {row['Users']} users")
         else:
             st.info("📉 No usage data available yet.")
 
