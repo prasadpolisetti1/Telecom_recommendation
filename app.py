@@ -186,6 +186,78 @@ def admin_dashboard(user):
     # --- Tab 2: Active Users ---
     with tabs[1]:
         st.subheader("👥 Active Users")
+        subtab1, subtab2 = st.tabs(["📊 Analysts", "👤 Customers"])
+
+    # --- Analysts Subtab ---
+    with subtab1:
+        analysts = list(users_collection.find({"approved": True, "role": "Analyst"}, {"password": 0}))
+        if analysts:
+            for a in analysts:
+                col1, col2, col3 = st.columns([3, 2, 2])
+                with col1:
+                    st.write(f"**{a.get('name','')}** — {a['email']}")
+                with col2:
+                    edit_key = f"edit_{a['email']}"
+                    if st.button("✏️ Edit", key=edit_key):
+                        st.session_state["edit_email"] = a['email']
+
+                # Show edit form only for the selected user
+                if st.session_state.get("edit_email") == a['email']:
+                    with st.form(f"edit_form_{a['email']}"):
+                        new_name = st.text_input("Name", value=a.get('name',''))
+                        new_email = st.text_input("Email", value=a['email'])
+                        submit_edit = st.form_submit_button("Update")
+                        if submit_edit:
+                            users_collection.update_one(
+                                {"email": a['email']},
+                                {"$set": {"name": new_name, "email": new_email}}
+                            )
+                            st.success(f"✅ Updated {new_email}")
+                            del st.session_state["edit_email"]
+                            st.experimental_rerun = lambda: None  # Dummy, Streamlit reruns automatically
+                with col3:
+                    if st.button("🗑️ Delete", key=f"delete_{a['email']}"):
+                        users_collection.delete_one({"email": a['email']})
+                        st.warning(f"Deleted {a['email']}")
+                        st.experimental_rerun = lambda: None  # Dummy, Streamlit reruns automatically
+        else:
+            st.info("No analysts found.")
+
+    # --- Customers Subtab ---
+    with subtab2:
+        customers = list(users_collection.find({"approved": True, "role": "Customer"}, {"password": 0}))
+        if customers:
+            for c in customers:
+                col1, col2, col3 = st.columns([3, 2, 2])
+                with col1:
+                    st.write(f"**{c.get('name','')}** — {c['email']}")
+                with col2:
+                    edit_key = f"edit_{c['email']}"
+                    if st.button("✏️ Edit", key=edit_key):
+                        st.session_state["edit_email"] = c['email']
+
+                if st.session_state.get("edit_email") == c['email']:
+                    with st.form(f"edit_form_{c['email']}"):
+                        new_name = st.text_input("Name", value=c.get('name',''))
+                        new_email = st.text_input("Email", value=c['email'])
+                        submit_edit = st.form_submit_button("Update")
+                        if submit_edit:
+                            users_collection.update_one(
+                                {"email": c['email']},
+                                {"$set": {"name": new_name, "email": new_email}}
+                            )
+                            st.success(f"✅ Updated {new_email}")
+                            del st.session_state["edit_email"]
+                            st.experimental_rerun = lambda: None
+                with col3:
+                    if st.button("🗑️ Delete", key=f"delete_{c['email']}"):
+                        users_collection.delete_one({"email": c['email']})
+                        st.warning(f"Deleted {c['email']}")
+                        st.experimental_rerun = lambda: None
+        else:
+            st.info("No customers found.")
+
+        st.subheader("👥 Active Users")
 
         subtab1, subtab2 = st.tabs(["📊 Analysts", "👤 Customers"])
 
