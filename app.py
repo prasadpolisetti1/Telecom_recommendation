@@ -563,8 +563,20 @@ def customer_dashboard(user):
         )
         if current_plan:
             st.success(
-                f"**{current_plan['plan_name']}** — ₹{current_plan['monthly_cost']} for {current_plan['validity_days']} days")
-            st.json(current_plan)
+                f"**{current_plan['plan_name']}** — ₹{current_plan['monthly_cost']} for {current_plan['validity_days']} days"
+            )
+
+            # Show plan details in table format
+            plan_data = {
+                "Plan Name": [current_plan.get("plan_name", "")],
+                "Monthly Cost (₹)": [current_plan.get("monthly_cost", 0)],
+                "Data Limit (GB)": [current_plan.get("data_limit_gb", 0)],
+                "Usage (GB)": [current_plan.get("usage_gb", 0)],
+                "Validity (Days)": [current_plan.get("validity_days", 0)],
+                "Start Date": [current_plan.get("start_date", "")],
+                "End Date": [current_plan.get("end_date", "")]
+            }
+            st.table(pd.DataFrame(plan_data))
 
             # Usage visualization
             st.markdown("#### 📊 Current Usage")
@@ -572,8 +584,12 @@ def customer_dashboard(user):
                 "Data Used (GB)": current_plan["usage_gb"],
                 "Data Left (GB)": current_plan["data_limit_gb"] - current_plan["usage_gb"]
             }])
-            fig = px.pie(usage_df.melt(), names="variable",
-                         values="value", title="Data Usage Split")
+            fig = px.pie(
+                usage_df.melt(),
+                names="variable",
+                values="value",
+                title="Data Usage Split"
+            )
             st.plotly_chart(fig, use_container_width=True)
 
         else:
