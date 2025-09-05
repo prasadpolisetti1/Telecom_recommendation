@@ -346,6 +346,7 @@ def admin_dashboard(user):
             else:
                 st.info("No users to export")
 
+
 # -----------------
 # ANALYST DASHBOARD
 # -----------------
@@ -353,34 +354,93 @@ def admin_dashboard(user):
 
 def analyst_dashboard(user):
     st.subheader("📊 Analyst Dashboard")
-    
-    # Total approved customers
-    total_customers = users_collection.count_documents({"role": "Customer", "approved": True})
-    
-    # Customer plan data
+
+    # --- Total approved customers ---
+    total_customers = users_collection.count_documents(
+        {"role": "Customer", "approved": True})
+
+    # --- Customer plan data ---
     customer_plans = list(db["CustomerPlans"].find({}))
     df_customer = pd.DataFrame(customer_plans)
-    
-    # Display key metrics
+
+    # --- Key Metrics ---
     col1, col2, col3 = st.columns(3)
     col1.metric("✅ Approved Customers", total_customers)
-    col2.metric("📦 Total Plan Subscriptions", len(df_customer))
-    col3.metric("💰 Total Revenue", df_customer["monthly_cost"].sum() if not df_customer.empty else 0)
-    
-    st.markdown("### 📝 Plan Distribution")
+    col2.metric("📦 Active Subscriptions", len(df_customer))
+    col3.metric("💰 Total Revenue", df_customer["monthly_cost"].sum(
+    ) if not df_customer.empty else 0)
+
     if not df_customer.empty:
-        plan_counts = df_customer["plan_name"].value_counts()
-        st.bar_chart(plan_counts)
-        
-        st.markdown("### 💰 Revenue per Plan")
-        revenue_per_plan = df_customer.groupby("plan_name")["monthly_cost"].sum()
-        st.bar_chart(revenue_per_plan)
-        
-        st.markdown("### 📋 Detailed Customer Plans")
-        st.dataframe(df_customer[["email", "plan_name", "monthly_cost", "usage_gb"]])
+        # =====================
+        # ACTIVE PLANS OVERVIEW
+        # =====================
+        st.markdown("### 📌 Currently Active Plans")
+        active_df = df_customer[df_customer["status"] == "Active"]
+        st.dataframe(
+            active_df[["email", "plan_name", "monthly_cost", "usage_gb", "start_date"]])
+
+        # =====================
+        # PLAN DISTRIBUTION
+        # =====================
+        st.markdown("### 📝 Plan Distribution")
+        plan_counts = active_df["plan_name"].value_counts().reset_index()
+        plan_counts.columns = ["Plan Name", "Users"]
+        fig1 = px.pie(plan_counts, names="Plan Name",
+                      values="Users", title="Plan Popularity")
+        st.plotly_chart(fig1, use_container_width=True)
+
+        # =====================
+        # REVENUE ANALYSIS
+        # =====================
+        st.markdown("### 💰 Revenue Insights")
+        revenue_per_plan = active_df.groupby(
+            "plan_name")["monthly_cost"].sum().reset_index()
+        fig2 = px.bar(revenue_per_plan, x="plan_name", y="monthly_cost",
+                      title="Revenue per Plan", color="plan_name")
+        st.plotly_chart(fig2, use_container_width=True)
+
+        # Revenue share
+        fig3 = px.pie(revenue_per_plan, names="plan_name", values="monthly_cost",
+                      title="Revenue Share by Plan")
+        st.plotly_chart(fig3, use_container_width=True)
+
+        # =====================
+        # CUSTOMER PLAN HISTORY
+        # =====================
+        st.markdown("### 📜 Customer Previous Plans Usage")
+        history_records = []
+        for _, row in df_customer.iterrows():
+            prev_plans = row.get("previous_plans", [])
+            for p in prev_plans:
+                history_records.append({
+                    "email": row["email"],
+                    "plan_name": p["plan_name"],
+                    "monthly_cost": p["monthly_cost"],
+                    "usage_gb": p["usage_gb"],
+                    "start_date": p["start_date"],
+                    "end_date": p["end_date"]
+                })
+
+        if history_records:
+            df_history = pd.DataFrame(history_records)
+            st.dataframe(df_history)
+
+            # Visualize usage trend per customer
+            fig4 = px.line(df_history, x="start_date", y="usage_gb",
+                           color="email", title="Customer Previous Plan Usage Over Time")
+            st.plotly_chart(fig4, use_container_width=True)
+
+            # Avg usage per plan (historical)
+            fig5 = px.bar(df_history.groupby("plan_name")["usage_gb"].mean().reset_index(),
+                          x="plan_name", y="usage_gb",
+                          title="Average Historical Usage per Plan")
+            st.plotly_chart(fig5, use_container_width=True)
+
+        else:
+            st.info("No previous plan history available.")
+
     else:
         st.info("No customer plan data available yet.")
-
 
 # -----------------
 # CUSTOMER DASHBOARD
