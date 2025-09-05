@@ -430,12 +430,6 @@ def analyst_dashboard(user):
                            color="email", title="Customer Previous Plan Usage Over Time")
             st.plotly_chart(fig4, use_container_width=True)
 
-            # Avg usage per plan (historical)
-            fig5 = px.bar(df_history.groupby("plan_name")["usage_gb"].mean().reset_index(),
-                          x="plan_name", y="usage_gb",
-                          title="Average Historical Usage per Plan")
-            st.plotly_chart(fig5, use_container_width=True)
-
         else:
             st.info("No previous plan history available.")
 
