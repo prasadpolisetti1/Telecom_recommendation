@@ -779,6 +779,7 @@ def customer_dashboard(user):
 def main_ui():
     if "user" not in st.session_state:
         st.session_state["user"] = None
+
     if st.session_state["user"] is None:
         page = st.sidebar.selectbox("📌 Menu", ["Signup", "Login"])
         if page == "Signup":
@@ -788,17 +789,22 @@ def main_ui():
     else:
         user = st.session_state["user"]
         st.sidebar.markdown(
-            f"**Logged in:** {user.get('name', '-')}  \nRole: **{user.get('role', '-')}**")
+            f"**Logged in:** {user.get('name', '-')}  \nRole: **{user.get('role', '-')}**"
+        )
+
         if st.sidebar.button("🔓 Logout"):
             st.session_state["user"] = None
             st.rerun()
+
         role = user.get("role", "").capitalize()
         if role == "Admin":
             admin_dashboard(user)
         elif role == "Analyst":
             analyst_dashboard(user)
-        else:
+        elif role == "Customer":
             customer_dashboard(user)
+        else:
+            st.error("❌ Unknown role. Please contact Admin.")
 
 
 # -----------------
