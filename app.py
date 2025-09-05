@@ -90,27 +90,37 @@ choice = st.sidebar.selectbox("Menu", menu)
 # SIGNUP PAGE
 # -----------------
 if choice == "Signup":
-    st.subheader("Create Account")
-    name = st.text_input("Name")
-    email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
-    role = st.selectbox("Role", ["Customer", "Analyst"])
-    if st.button("Signup"):
+    st.markdown("### ✍️ Create Account")
+    with st.form("signup_form"):
+        name = st.text_input("👤 Name")
+        email = st.text_input("📧 Email")
+        password = st.text_input("🔑 Password", type="password")
+        role = st.selectbox("🎭 Role", ["Customer", "Analyst"])
+        submit_signup = st.form_submit_button("🚀 Signup")
+
+    if submit_signup:
         success, msg = signup_user(name, email, password, role)
-        st.info(msg)
+        if success:
+            st.success(msg)
+        else:
+            st.error(msg)
+
 
 # -----------------
 # LOGIN PAGE
 # -----------------
 elif choice == "Login":
-    st.subheader("Login")
-    email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
-    if st.button("Login"):
+    st.markdown("### 🔐 Login to Your Account")
+    with st.form("login_form"):
+        email = st.text_input("📧 Email")
+        password = st.text_input("🔑 Password", type="password")
+        submit_login = st.form_submit_button("➡️ Login")
+
+    if submit_login:
         success, result = login_user(email, password)
         if success:
             user = result
-            st.success(f"Welcome {user['name']}! Role: {user['role']}")
+            st.success(f"🎉 Welcome {user['name']}! Role: {user['role']}")
 
             # ADMIN DASHBOARD
             if user["role"] == "Admin":
