@@ -353,15 +353,34 @@ def admin_dashboard(user):
 
 def analyst_dashboard(user):
     st.subheader("📊 Analyst Dashboard")
-    st.write("Here you will be able to analyze usage and recharge data.")
-    total_customers = users_collection.count_documents(
-        {"role": "Customer", "approved": True})
-    total_analysts = users_collection.count_documents(
-        {"role": "Analyst", "approved": True})
-    col1, col2 = st.columns(2)
+    
+    # Total approved customers
+    total_customers = users_collection.count_documents({"role": "Customer", "approved": True})
+    
+    # Customer plan data
+    customer_plans = list(db["CustomerPlans"].find({}))
+    df_customer = pd.DataFrame(customer_plans)
+    
+    # Display key metrics
+    col1, col2, col3 = st.columns(3)
     col1.metric("✅ Approved Customers", total_customers)
-    col2.metric("✅ Approved Analysts", total_analysts)
-    st.info("📈 Charts and analytics will be added here later.")
+    col2.metric("📦 Total Plan Subscriptions", len(df_customer))
+    col3.metric("💰 Total Revenue", df_customer["monthly_cost"].sum() if not df_customer.empty else 0)
+    
+    st.markdown("### 📝 Plan Distribution")
+    if not df_customer.empty:
+        plan_counts = df_customer["plan_name"].value_counts()
+        st.bar_chart(plan_counts)
+        
+        st.markdown("### 💰 Revenue per Plan")
+        revenue_per_plan = df_customer.groupby("plan_name")["monthly_cost"].sum()
+        st.bar_chart(revenue_per_plan)
+        
+        st.markdown("### 📋 Detailed Customer Plans")
+        st.dataframe(df_customer[["email", "plan_name", "monthly_cost", "usage_gb"]])
+    else:
+        st.info("No customer plan data available yet.")
+
 
 # -----------------
 # CUSTOMER DASHBOARD
