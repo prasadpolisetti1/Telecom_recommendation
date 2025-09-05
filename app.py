@@ -190,12 +190,13 @@ def admin_dashboard(user):
 
     # --- Analysts Subtab ---
     with subtab1:
-        analysts = list(users_collection.find({"approved": True, "role": "Analyst"}, {"password": 0}))
+        analysts = list(users_collection.find(
+            {"approved": True, "role": "Analyst"}, {"password": 0}))
         if analysts:
             for a in analysts:
                 col1, col2, col3 = st.columns([3, 2, 2])
                 with col1:
-                    st.write(f"**{a.get('name','')}** — {a['email']}")
+                    st.write(f"**{a.get('name', '')}** — {a['email']}")
                 with col2:
                     edit_key = f"edit_{a['email']}"
                     if st.button("✏️ Edit", key=edit_key):
@@ -204,7 +205,8 @@ def admin_dashboard(user):
                 # Show edit form only for the selected user
                 if st.session_state.get("edit_email") == a['email']:
                     with st.form(f"edit_form_{a['email']}"):
-                        new_name = st.text_input("Name", value=a.get('name',''))
+                        new_name = st.text_input(
+                            "Name", value=a.get('name', ''))
                         new_email = st.text_input("Email", value=a['email'])
                         submit_edit = st.form_submit_button("Update")
                         if submit_edit:
@@ -225,12 +227,13 @@ def admin_dashboard(user):
 
     # --- Customers Subtab ---
     with subtab2:
-        customers = list(users_collection.find({"approved": True, "role": "Customer"}, {"password": 0}))
+        customers = list(users_collection.find(
+            {"approved": True, "role": "Customer"}, {"password": 0}))
         if customers:
             for c in customers:
                 col1, col2, col3 = st.columns([3, 2, 2])
                 with col1:
-                    st.write(f"**{c.get('name','')}** — {c['email']}")
+                    st.write(f"**{c.get('name', '')}** — {c['email']}")
                 with col2:
                     edit_key = f"edit_{c['email']}"
                     if st.button("✏️ Edit", key=edit_key):
@@ -238,7 +241,8 @@ def admin_dashboard(user):
 
                 if st.session_state.get("edit_email") == c['email']:
                     with st.form(f"edit_form_{c['email']}"):
-                        new_name = st.text_input("Name", value=c.get('name',''))
+                        new_name = st.text_input(
+                            "Name", value=c.get('name', ''))
                         new_email = st.text_input("Email", value=c['email'])
                         submit_edit = st.form_submit_button("Update")
                         if submit_edit:
