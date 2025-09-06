@@ -5,7 +5,8 @@ from pymongo import MongoClient
 import pandas as pd
 import random
 import plotly.express as px
-
+import streamlit.components.v1 as components
+import numpy as np
 
 # --- Always FIRST Streamlit command ---
 st.set_page_config(page_title="Telecom Plan Recommender", layout="wide")
@@ -316,16 +317,13 @@ def admin_dashboard(user):
         st.subheader("📦 Manage Recharge Plans")
         plans_collection = db["Plans"]
 
+        # --- Add Plan Form ---
         with st.form("add_plan_form"):
             plan_name = st.text_input("📛 Plan Name")
-            monthly_cost = st.number_input(
-                "💰 Monthly Cost (₹)", min_value=0.0, step=10.0)
-            data_limit_gb = st.number_input(
-                "📶 Data Limit (GB)", min_value=0, step=1)
-            voice_minutes = st.number_input(
-                "📞 Voice Minutes", min_value=0, step=10)
-            validity_days = st.number_input(
-                "📅 Validity (Days)", min_value=1, step=1)
+            monthly_cost = st.number_input("💰 Monthly Cost (₹)", min_value=0.0, step=10.0)
+            data_limit_gb = st.number_input("📶 Data Limit (GB)", min_value=0, step=1)
+            voice_minutes = st.number_input("📞 Voice Minutes", min_value=0, step=10)
+            validity_days = st.number_input("📅 Validity (Days)", min_value=1, step=1)
             submit_plan = st.form_submit_button("➕ Add Plan")
 
         if submit_plan:
@@ -340,18 +338,42 @@ def admin_dashboard(user):
                     "validity_days": validity_days
                 })
                 st.success(f"✅ Plan '{plan_name}' added successfully!")
-                st.rerun()
+                st.experimental_rerun()
 
+        # --- Display Existing Plans ---
         st.markdown("### 📋 Existing Plans")
         all_plans = list(plans_collection.find())
+
         if all_plans:
-            df = pd.DataFrame(all_plans).drop(columns=["_id"])
-            st.dataframe(df)
-            for p in all_plans:
-                if st.button(f"🗑️ Delete {p['plan_name']}", key=f"del_plan_{p['plan_name']}"):
-                    plans_collection.delete_one({"plan_name": p["plan_name"]})
-                    st.warning(f"Deleted plan: {p['plan_name']}")
-                    st.rerun()
+            for idx, plan in enumerate(all_plans):
+                # Card container using components.html for better styling
+                card_html = f"""
+                <div style="
+                    border-radius:12px;
+                    padding:16px;
+                    margin-bottom:16px;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+                    border:1px solid rgba(0,0,0,0.05);
+                    background: #ffffff;
+                    font-family: Arial, sans-serif;
+                    position: relative;
+                ">
+                    <h4 style="margin:0 0 8px 0; color:#1f2937;">{plan['plan_name']}</h4>
+                    <p style="margin:4px 0; font-size:14px; color:#374151;">
+                        💰 <b>₹{plan['monthly_cost']}</b> / month<br>
+                        📶 <b>{plan['data_limit_gb']} GB</b> data<br>
+                        📞 <b>{plan.get('voice_minutes', 'Unlimited')}</b> minutes<br>
+                        📅 <b>{plan['validity_days']} days</b>
+                    </p>
+                </div>
+                """
+                components.html(card_html, height=140)
+
+                # Delete button below each card
+                if st.button("🗑️ Delete", key=f"del_plan_{idx}_{plan['plan_name']}"):
+                    plans_collection.delete_one({"_id": plan["_id"]})
+                    st.warning(f"Deleted plan: {plan['plan_name']}")
+                    st.experimental_rerun()
         else:
             st.info("No plans added yet.")
 
@@ -484,293 +506,333 @@ def analyst_dashboard(user):
         # =====================
         # CUSTOMER PLAN HISTORY
         # =====================
-        st.markdown("### 📜 Customer Previous Plans Usage")
-        history_records = []
-        for _, row in df_customer.iterrows():
-            prev_plans = row.get("previous_plans", [])
-            for p in prev_plans:
-                history_records.append({
-                    "email": row["email"],
-                    "plan_name": p["plan_name"],
-                    "monthly_cost": p["monthly_cost"],
-                    "usage_gb": p["usage_gb"],
-                    "start_date": p["start_date"],
-                    "end_date": p["end_date"]
-                })
-
-        if history_records:
-            df_history = pd.DataFrame(history_records)
-            st.dataframe(df_history)
-
-            # Visualize usage trend per customer
-            fig4 = px.line(df_history, x="start_date", y="usage_gb",
-                           color="email", title="Customer Previous Plan Usage Over Time")
-            st.plotly_chart(fig4, use_container_width=True)
-
-        else:
-            st.info("No previous plan history available.")
-
+       
     else:
         st.info("No customer plan data available yet.")
 
 
 # -----------------
 # CUSTOMER DASHBOARD
+def _normalize_plan(plan):
+    """Return a plain dict with _id as string so it is session-safe."""
+    p = dict(plan)
+    if "_id" in p:
+        p["_id"] = str(p["_id"])
+    return p
 # -----------------
 
 
-def customer_dashboard(user):
+def customer_dashboard(user, db):
+    """
+    customer_dashboard(user, db)
+      - user: dict with at least 'email' and optionally 'name'
+      - db: pymongo database handle (contains 'User', 'Plans', 'CustomerPlans' collections)
+    Assumes one document per-user in CustomerPlans representing the ACTIVE plan and a field
+    'previous_plans' which is a list of past plans.
+    """
+    users_collection = db["User"]
+    plans_collection = db["Plans"]
+    cust_collection = db["CustomerPlans"]
+
     st.subheader("👤 Customer Dashboard")
-    st.write(f"Welcome, **{user.get('name')}** ({user.get('email')})")
+    st.write(f"Welcome, **{user.get('name', '-') }** ({user.get('email', '-')})")
 
     tabs = st.tabs([
         "📝 Profile",
         "📦 Current Plan",
         "📜 Previous Plans",
-        "🤖 Recommendations"
+        "🎯 Recommendations"
     ])
 
-    # --- Tab 1: Profile ---
+    # ---------------- Tab 0: Profile ----------------
     with tabs[0]:
         st.markdown("### 📝 Your Profile")
-
-        # Show profile in table format
-        profile_data = {
-            "Name": [user.get("name", "")],
-            "Email": [user.get("email", "")]
-        }
+        profile_data = {"Name": [user.get("name", "")], "Email": [user.get("email", "")]}
         st.table(pd.DataFrame(profile_data))
 
-        # Edit profile option
         st.markdown("### ✏️ Edit Profile")
-        with st.form("edit_profile"):
-            new_name = st.text_input("Name", user.get("name", ""))
-            new_email = st.text_input("Email", user.get("email", ""))
-            submit_profile = st.form_submit_button("💾 Update Profile")
+        form_key = f"edit_profile_{user['email']}"
+        with st.form(form_key):
+            new_name = st.text_input("Name", value=user.get("name", ""))
+            new_email = st.text_input("Email", value=user.get("email", ""))
+            submit = st.form_submit_button("💾 Update Profile")
+        if submit:
+            users_collection.update_one({"email": user["email"]}, {"$set": {"name": new_name, "email": new_email}})
+            st.success("✅ Profile updated! (refreshing...)")
+            try:
+                st.experimental_rerun()
+            except Exception:
+                pass
 
-        if submit_profile:
-            users_collection.update_one(
-                {"email": user["email"]},
-                {"$set": {"name": new_name, "email": new_email}}
-            )
-            st.success("✅ Profile updated! Please refresh.")
-
-    # --- Tab 2: Current Plan ---
+    # ---------------- Tab 1: Current Plan ----------------
     with tabs[1]:
         st.markdown("### 📦 Current Active Plan")
-        current_plan = db["CustomerPlans"].find_one(
-            {"email": user["email"], "status": "Active"}
-        )
-        if current_plan:
-            st.success(
-                f"**{current_plan['plan_name']}** — ₹{current_plan['monthly_cost']} for {current_plan['validity_days']} days"
-            )
+        active_doc = cust_collection.find_one({"email": user["email"], "status": "Active"})
+        if active_doc:
+            # Card view
+            card_html = f"""
+            <div style="
+                border-radius:12px; padding:16px; margin-bottom:12px;
+                box-shadow: 0 8px 20px rgba(0,0,0,0.06);
+                border:1px solid rgba(0,0,0,0.06);
+                background: linear-gradient(180deg,#ffffff,#f7fbff);
+                font-family: Arial, sans-serif;
+            ">
+                <h3 style="margin:0 0 6px 0;">{active_doc.get('plan_name')}</h3>
+                <p style="margin:4px 0;">💰 <b>₹{active_doc.get('monthly_cost')}</b> / month &nbsp; | &nbsp;
+                📶 <b>{active_doc.get('data_limit_gb')} GB</b> &nbsp; | &nbsp;
+                📅 <b>{active_doc.get('validity_days')} days</b></p>
+                <p style="color:#333;margin:6px 0;">Started: {active_doc.get('start_date')} &nbsp; • &nbsp; Ends: {active_doc.get('end_date')}</p>
+            </div>
+            """
+            components.html(card_html, height=160)
 
-            # Show plan details in table format
-            plan_data = {
-                "Plan Name": [current_plan.get("plan_name", "")],
-                "Monthly Cost (₹)": [current_plan.get("monthly_cost", 0)],
-                "Data Limit (GB)": [current_plan.get("data_limit_gb", 0)],
-                "Usage (GB)": [current_plan.get("usage_gb", 0)],
-                "Validity (Days)": [current_plan.get("validity_days", 0)],
-                "Start Date": [current_plan.get("start_date", "")],
-                "End Date": [current_plan.get("end_date", "")]
-            }
-            st.table(pd.DataFrame(plan_data))
-
-            # Usage visualization
-            st.markdown("#### 📊 Current Usage")
-            usage_df = pd.DataFrame([{
-                "Data Used (GB)": current_plan["usage_gb"],
-                "Data Left (GB)": current_plan["data_limit_gb"] - current_plan["usage_gb"]
-            }])
-            fig = px.pie(
-                usage_df.melt(),
-                names="variable",
-                values="value",
-                title="Data Usage Split"
-            )
+            # Usage pie
+            usage_gb = active_doc.get("usage_gb", 0)
+            data_limit = active_doc.get("data_limit_gb", 0) or 0
+            left = max(data_limit - usage_gb, 0)
+            usage_df = pd.DataFrame({"segment":["Used (GB)", "Left (GB)"], "value":[usage_gb, left]})
+            fig = px.pie(usage_df, names="segment", values="value", title="Data Usage")
             st.plotly_chart(fig, use_container_width=True)
-
         else:
-            st.info("No active plan found.")
+            st.info("No active plan found. Buy a plan from Recommendations tab.")
 
-    # --- Tab 3: Previous Plans ---
+    # ---------------- Tab 2: Previous Plans ----------------
     with tabs[2]:
         st.markdown("### 📜 Previous Plans")
-        prev_plans = db["CustomerPlans"].find(
-            {"email": user["email"], "status": "Expired"}
-        )
-        prev_df = pd.DataFrame(list(prev_plans))
-        if not prev_df.empty:
-            st.dataframe(
-                prev_df[["plan_name", "monthly_cost", "usage_gb", "start_date", "end_date"]])
+        cust_doc = cust_collection.find_one({"email": user["email"]})
+        prev_list = cust_doc.get("previous_plans", []) if cust_doc else []
 
-            # Usage trend
-            fig2 = px.line(prev_df, x="start_date", y="usage_gb",
-                           title="Usage Over Time", markers=True)
-            st.plotly_chart(fig2, use_container_width=True)
+        if prev_list:
+            prev_df = pd.DataFrame(prev_list)
+            # Try parse dates for plotting
+            if "start_date" in prev_df.columns:
+                prev_df["start_date_parsed"] = pd.to_datetime(prev_df["start_date"], errors="coerce")
+            display_cols = [c for c in ["plan_name", "monthly_cost", "usage_gb", "start_date", "end_date"] if c in prev_df.columns]
+            st.dataframe(prev_df[display_cols].sort_values(by="start_date", ascending=False))
 
-            # Cost vs Usage
-            fig3 = px.scatter(prev_df, x="monthly_cost", y="usage_gb", size="usage_gb",
-                              text="plan_name", title="Cost vs Usage")
-            st.plotly_chart(fig3, use_container_width=True)
+            # Usage trend if possible
+            if "start_date_parsed" in prev_df.columns and "usage_gb" in prev_df.columns:
+                try:
+                    fig2 = px.line(prev_df.sort_values("start_date_parsed"), x="start_date_parsed", y="usage_gb", title="Usage Over Time", markers=True)
+                    st.plotly_chart(fig2, use_container_width=True)
+                except Exception:
+                    pass
         else:
-            st.info("No previous plan history found.")
+            st.info("No previous plan history found. When you change plans, previous plans will appear here.")
 
-    # --- Tab 4: Recommendations ---
+    # ---------------- Tab 3: Recommendations ----------------
     with tabs[3]:
         st.markdown("### 🎯 Plan Recommendations")
 
-        # ---------------- Manual Recommendation ----------------
+        # --- MANUAL SEARCH ---
         st.markdown("#### ✋ Manual Input Recommendation")
-        budget = st.slider("Your Budget (₹)", 100, 2000, 500)
-        data_need = st.slider("Expected Data (GB)", 1, 200, 20)
-        validity = st.slider("Validity (Days)", 1, 90, 28)
+        budget = st.slider("Your Budget (₹)", 100, 2000, 500, key=f"budget_{user['email']}")
+        data_need = st.slider("Expected Data (GB)", 1, 200, 20, key=f"data_{user['email']}")
+        validity = st.slider("Validity (Days)", 1, 90, 28, key=f"validity_{user['email']}")
 
-        if st.button("🔍 Find Matching Plans"):
-            match_plans = list(db["Plans"].find({
+        manual_key = f"manual_matches_{user['email']}"
+        if manual_key not in st.session_state:
+            st.session_state[manual_key] = []
+
+        if st.button("🔍 Find Matching Plans", key=f"find_plans_btn_{user['email']}"):
+            matches = list(plans_collection.find({
                 "monthly_cost": {"$lte": budget},
                 "data_limit_gb": {"$gte": data_need},
                 "validity_days": {"$gte": validity}
             }))
+            st.session_state[manual_key] = [_normalize_plan(p) for p in matches]
 
-            if match_plans:
-                df_match = pd.DataFrame(match_plans).drop(columns=["_id"])
-                st.dataframe(df_match)
-
-                # Select plan to buy
-                plan_names = [p["plan_name"] for p in match_plans]
-                selected_plan = st.selectbox(
-                    "Choose a plan to buy", plan_names)
-
-                if st.button("🛒 Buy Selected Plan"):
-                    chosen = next(
-                        p for p in match_plans if p["plan_name"] == selected_plan)
-
-                    active_plan = db["CustomerPlans"].find_one(
-                        {"email": user["email"]})
-                    if active_plan:
-                        # Push current active plan to previous_plans
-                        prev = {
-                            "plan_name": active_plan["plan_name"],
-                            "monthly_cost": active_plan["monthly_cost"],
-                            "usage_gb": active_plan["usage_gb"],
-                            "start_date": active_plan["start_date"],
-                            "end_date": str(pd.Timestamp.now())
-                        }
-                        db["CustomerPlans"].update_one(
-                            {"email": user["email"]},
-                            {
-                                "$push": {"previous_plans": prev},
-                                "$set": {
-                                    "plan_name": chosen["plan_name"],
-                                    "monthly_cost": chosen["monthly_cost"],
-                                    "data_limit_gb": chosen["data_limit_gb"],
-                                    "usage_gb": 0,
-                                    "validity_days": chosen["validity_days"],
-                                    "status": "Active",
-                                    "start_date": str(pd.Timestamp.now().date()),
-                                    "end_date": str((pd.Timestamp.now() + pd.Timedelta(days=chosen["validity_days"])).date())
-                                }
+        match_plans = st.session_state.get(manual_key, [])
+        if match_plans:
+            st.success("✨ Plans that match your input:")
+            for idx, plan in enumerate(match_plans):
+                col1, col2 = st.columns([4, 1])
+                with col1:
+                    card_html = f"""
+                    <div style="
+                        border-radius:12px; padding:14px; margin-bottom:10px;
+                        box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+                        border:1px solid rgba(0,0,0,0.06);
+                        background: linear-gradient(180deg, #ffffff, #fbfbff);
+                        position: relative; font-family: Arial, sans-serif;
+                    ">
+                        <div style="position:absolute; top:10px; left:10px;
+                                    background:#0ea5e9; color:white; padding:4px 8px;
+                                    border-radius:10px; font-size:12px;">
+                        💡 Suggested
+                        </div>
+                        <h3 style="margin:26px 0 6px 0; color:#1f2937;">{plan.get('plan_name')}</h3>
+                        <p style="margin:6px 0; font-size:14px; color:#374151;">
+                        💰 <b>₹{plan.get('monthly_cost')}</b> / month<br>
+                        📶 <b>{plan.get('data_limit_gb')} GB</b> data<br>
+                        📞 <b>{plan.get('voice_minutes','Unlimited')}</b> minutes<br>
+                        📅 <b>{plan.get('validity_days')} days</b>
+                        </p>
+                    </div>
+                    """
+                    components.html(card_html, height=200)
+                with col2:
+                    plan_id_str = str(plan.get("_id", idx))
+                    btn_key = f"manual_buy_{user['email']}_{plan_id_str}"
+                    if st.button(f"🛒 Buy {plan.get('plan_name')}", key=btn_key):
+                        chosen = plan
+                        # find active doc for this user
+                        active_plan = cust_collection.find_one({"email": user["email"], "status": "Active"})
+                        if active_plan:
+                            prev = {
+                                "plan_name": active_plan.get("plan_name"),
+                                "monthly_cost": active_plan.get("monthly_cost"),
+                                "data_limit_gb": active_plan.get("data_limit_gb"),
+                                "usage_gb": active_plan.get("usage_gb", 0),
+                                "start_date": active_plan.get("start_date"),
+                                "end_date": str(pd.Timestamp.now().date())
                             }
-                        )
-                    else:
-                        # First plan purchase
-                        db["CustomerPlans"].insert_one({
-                            "email": user["email"],
-                            "plan_name": chosen["plan_name"],
-                            "monthly_cost": chosen["monthly_cost"],
-                            "data_limit_gb": chosen["data_limit_gb"],
-                            "usage_gb": 0,
-                            "validity_days": chosen["validity_days"],
-                            "status": "Active",
-                            "start_date": str(pd.Timestamp.now().date()),
-                            "end_date": str((pd.Timestamp.now() + pd.Timedelta(days=chosen["validity_days"])).date()),
-                            "previous_plans": []
-                        })
-
-                    st.success(
-                        f"✅ You have successfully purchased **{chosen['plan_name']}**")
-
-            else:
-                st.warning("No matching plans found!")
-
-        # ---------------- ML Recommendation ----------------
-        st.markdown("#### 🤖 AI-Based Recommendation")
-
-        all_plans = list(db["Plans"].find({}))
-        df_plans = pd.DataFrame(all_plans)
-
-        if not df_plans.empty:
-            features = df_plans[["monthly_cost",
-                                 "data_limit_gb", "validity_days"]]
-            model = NearestNeighbors(n_neighbors=3)
-            model.fit(features)
-
-            last_plan = db["CustomerPlans"].find_one({"email": user["email"]})
-
-            if last_plan:
-                query = [[last_plan["monthly_cost"],
-                          last_plan["data_limit_gb"], last_plan["validity_days"]]]
-                distances, indices = model.kneighbors(query)
-                recommended = df_plans.iloc[indices[0]]
-                st.success("Based on your past usage, we recommend:")
-                st.dataframe(recommended)
-
-                rec_plan_names = recommended["plan_name"].tolist()
-                rec_selected = st.selectbox(
-                    "Choose a recommended plan to buy", rec_plan_names, key="rec")
-
-                if st.button("🛒 Buy Recommended Plan"):
-                    chosen = df_plans[df_plans["plan_name"]
-                                      == rec_selected].iloc[0].to_dict()
-
-                    active_plan = db["CustomerPlans"].find_one(
-                        {"email": user["email"]})
-                    if active_plan:
-                        prev = {
-                            "plan_name": active_plan["plan_name"],
-                            "monthly_cost": active_plan["monthly_cost"],
-                            "usage_gb": active_plan["usage_gb"],
-                            "start_date": active_plan["start_date"],
-                            "end_date": str(pd.Timestamp.now())
-                        }
-                        db["CustomerPlans"].update_one(
-                            {"email": user["email"]},
-                            {
-                                "$push": {"previous_plans": prev},
-                                "$set": {
-                                    "plan_name": chosen["plan_name"],
-                                    "monthly_cost": chosen["monthly_cost"],
-                                    "data_limit_gb": chosen["data_limit_gb"],
-                                    "usage_gb": 0,
-                                    "validity_days": chosen["validity_days"],
-                                    "status": "Active",
-                                    "start_date": str(pd.Timestamp.now().date()),
-                                    "end_date": str((pd.Timestamp.now() + pd.Timedelta(days=chosen["validity_days"])).date())
+                            cust_collection.update_one(
+                                {"email": user["email"], "status": "Active"},
+                                {
+                                    "$push": {"previous_plans": prev},
+                                    "$set": {
+                                        "plan_name": chosen.get("plan_name"),
+                                        "monthly_cost": chosen.get("monthly_cost"),
+                                        "data_limit_gb": chosen.get("data_limit_gb"),
+                                        "usage_gb": 0,
+                                        "validity_days": chosen.get("validity_days"),
+                                        "status": "Active",
+                                        "start_date": str(pd.Timestamp.now().date()),
+                                        "end_date": str((pd.Timestamp.now() + pd.Timedelta(days=int(chosen.get("validity_days", 0)))).date())
+                                    }
                                 }
-                            }
-                        )
-                    else:
-                        db["CustomerPlans"].insert_one({
-                            "email": user["email"],
-                            "plan_name": chosen["plan_name"],
-                            "monthly_cost": chosen["monthly_cost"],
-                            "data_limit_gb": chosen["data_limit_gb"],
-                            "usage_gb": 0,
-                            "validity_days": chosen["validity_days"],
-                            "status": "Active",
-                            "start_date": str(pd.Timestamp.now().date()),
-                            "end_date": str((pd.Timestamp.now() + pd.Timedelta(days=chosen["validity_days"])).date()),
-                            "previous_plans": []
-                        })
+                            )
+                        else:
+                            cust_collection.insert_one({
+                                "email": user["email"],
+                                "plan_name": chosen.get("plan_name"),
+                                "monthly_cost": chosen.get("monthly_cost"),
+                                "data_limit_gb": chosen.get("data_limit_gb"),
+                                "usage_gb": 0,
+                                "validity_days": chosen.get("validity_days"),
+                                "status": "Active",
+                                "start_date": str(pd.Timestamp.now().date()),
+                                "end_date": str((pd.Timestamp.now() + pd.Timedelta(days=int(chosen.get("validity_days", 0)))).date()),
+                                "previous_plans": []
+                            })
 
-                    st.success(
-                        f"✅ You have successfully purchased **{chosen['plan_name']}**")
+                        # clear stored manual matches (optional)
+                        st.session_state[manual_key] = []
+                        st.success(f"✅ You have successfully purchased **{chosen.get('plan_name')}**")
+                        try:
+                            st.experimental_rerun()
+                        except Exception:
+                            pass
+        else:
+            st.info("No manual matches yet. Use sliders then click 'Find Matching Plans'.")
+
+        # --- ML / Auto Recommendation ---
+        st.markdown("#### 🤖 AI-Based Recommendation (Auto)")
+        all_plans = list(plans_collection.find({}))
+        if not all_plans:
+            st.info("No plans available.")
+        else:
+            df_plans = pd.DataFrame([_normalize_plan(p) for p in all_plans])
+            # Ensure numeric features
+            for col in ["monthly_cost", "data_limit_gb", "validity_days"]:
+                if col in df_plans.columns:
+                    df_plans[col] = pd.to_numeric(df_plans[col], errors="coerce").fillna(0)
+
+            active_plan = cust_collection.find_one({"email": user["email"], "status": "Active"})
+            if active_plan:
+                # recommend nearest neighbors to current plan
+                feat_cols = ["monthly_cost", "data_limit_gb", "validity_days"]
+                X = df_plans[feat_cols].values
+                n_neighbors = min(5, len(df_plans))
+                model = NearestNeighbors(n_neighbors=n_neighbors)
+                model.fit(X)
+                q = [[active_plan.get("monthly_cost", 0), active_plan.get("data_limit_gb", 0), active_plan.get("validity_days", 0)]]
+                distances, indices = model.kneighbors(q)
+                recommended = df_plans.iloc[indices[0]].reset_index(drop=True)
+                st.success("🤖 Based on your past usage, we recommend:")
             else:
-                st.info("Not enough history for ML-based recommendation.")
+                # new user -> show all plans
+                recommended = df_plans.reset_index(drop=True)
+                st.success("✨ New user — Showing all available plans:")
 
+            for idx, row in recommended.iterrows():
+                plan = row.to_dict()
+                c1, c2 = st.columns([4, 1])
+                with c1:
+                    card_html = f"""
+                    <div style="
+                        border-radius:12px; padding:14px; margin-bottom:12px;
+                        box-shadow: 0 8px 20px rgba(0,0,0,0.06);
+                        border:1px solid rgba(0,0,0,0.06);
+                        background: linear-gradient(180deg,#ffffff,#f7fbff);
+                        position:relative; font-family: Arial, sans-serif;
+                    ">
+                        <div style="position:absolute; top:10px; left:10px;
+                                    background:#ff6b6b; color:white; padding:4px 8px;
+                                    border-radius:10px; font-size:12px;">
+                        ⭐ Recommended
+                        </div>
+                        <h3 style="margin:26px 0 6px 0; color:#1f2937;">{plan.get('plan_name')}</h3>
+                        <p style="margin:6px 0; font-size:14px; color:#374151;">
+                        💰 <b>₹{plan.get('monthly_cost')}</b> / month<br>
+                        📶 <b>{plan.get('data_limit_gb')} GB</b> data<br>
+                        📞 <b>{plan.get('voice_minutes','Unlimited')}</b> minutes<br>
+                        📅 <b>{plan.get('validity_days')} days</b>
+                        </p>
+                    </div>
+                    """
+                    components.html(card_html, height=200)
+                with c2:
+                    plan_id_str = str(plan.get("_id", idx))
+                    btn_key = f"ml_buy_{user['email']}_{plan_id_str}"
+                    if st.button(f"🛒 Buy {plan.get('plan_name')}", key=btn_key):
+                        chosen = plan
+                        active = cust_collection.find_one({"email": user["email"], "status": "Active"})
+                        if active:
+                            prev = {
+                                "plan_name": active.get("plan_name"),
+                                "monthly_cost": active.get("monthly_cost"),
+                                "data_limit_gb": active.get("data_limit_gb"),
+                                "usage_gb": active.get("usage_gb", 0),
+                                "start_date": active.get("start_date"),
+                                "end_date": str(pd.Timestamp.now().date())
+                            }
+                            cust_collection.update_one(
+                                {"email": user["email"], "status": "Active"},
+                                {
+                                    "$push": {"previous_plans": prev},
+                                    "$set": {
+                                        "plan_name": chosen.get("plan_name"),
+                                        "monthly_cost": chosen.get("monthly_cost"),
+                                        "data_limit_gb": chosen.get("data_limit_gb"),
+                                        "usage_gb": 0,
+                                        "validity_days": chosen.get("validity_days"),
+                                        "status": "Active",
+                                        "start_date": str(pd.Timestamp.now().date()),
+                                        "end_date": str((pd.Timestamp.now() + pd.Timedelta(days=int(chosen.get("validity_days", 0)))).date())
+                                    }
+                                }
+                            )
+                        else:
+                            cust_collection.insert_one({
+                                "email": user["email"],
+                                "plan_name": chosen.get("plan_name"),
+                                "monthly_cost": chosen.get("monthly_cost"),
+                                "data_limit_gb": chosen.get("data_limit_gb"),
+                                "usage_gb": 0,
+                                "validity_days": chosen.get("validity_days"),
+                                "status": "Active",
+                                "start_date": str(pd.Timestamp.now().date()),
+                                "end_date": str((pd.Timestamp.now() + pd.Timedelta(days=int(chosen.get("validity_days", 0)))).date()),
+                                "previous_plans": []
+                            })
+                        st.success(f"✅ You have successfully purchased **{chosen.get('plan_name')}**")
+                        try:
+                            st.experimental_rerun()
+                        except Exception:
+                            pass
 # -----------------
 # MAIN APP FLOW
 # -----------------
@@ -802,7 +864,7 @@ def main_ui():
         elif role == "Analyst":
             analyst_dashboard(user)
         elif role == "Customer":
-            customer_dashboard(user)
+            customer_dashboard(user ,db)
         else:
             st.error("❌ Unknown role. Please contact Admin.")
 
